@@ -1,0 +1,173 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  USER
+  ADMIN
+}
+
+enum OrderStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  CANCELLED
+  EXPIRED
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+  EXPIRED
+  REFUNDED
+}
+
+enum PaymentProvider {
+  XENDIT
+}
+
+enum PaymentMethod {
+  QRIS
+  DANA
+  GOPAY
+}
+
+enum DigitalStockStatus {
+  AVAILABLE
+  RESERVED
+  DELIVERED
+}
+
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  passwordHash String
+  role         UserRole @default(USER)
+  orders       Order[]
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  @@map("users")
+}
+
+model Category {
+  id          String    @id @default(cuid())
+  name        String
+  slug        String    @unique
+  description String?
+  products    Product[]
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  @@map("categories")
+}
+
+model Product {
+  id          String   @id @default(cuid())
+  categoryId  String
+  name        String
+  slug        String   @unique
+  description String?
+  imageUrl    String?
+  price       Decimal  @db.Decimal(18, 2)
+  isActive    Boolean  @default(true)
+  category    Category @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  stocks      DigitalStock[]
+  orderItems  OrderItem[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  @@index([categoryId])
+  @@index([isActive])
+  @@map("products")
+}
+
+model DigitalStock {
+  id               String             @id @default(cuid())
+  productId        String
+  encryptedPayload String             @db.Text
+  status           DigitalStockStatus @default(AVAILABLE)
+  reservedUntil    DateTime?
+  orderItemId      String?
+  product          Product   @relation(fields: [productId], references: [id], onDelete: Restrict)
+  orderItem        OrderItem? @relation(fields: [orderItemId], references: [id], onDelete: Restrict)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  @@index([productId, status])
+  @@index([orderItemId])
+  @@map("digital_stocks")
+}
+
+model Order {
+  id          String      @id @default(cuid())
+  orderNumber String      @unique
+  userId      String
+  status      OrderStatus @default(PENDING)
+  totalAmount Decimal     @db.Decimal(18, 2)
+  user        User        @relation(fields: [userId], references: [id], onDelete: Restrict)
+  items       OrderItem[]
+  payments    Payment[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  @@index([userId, createdAt])
+  @@index([status])
+  @@map("orders")
+}
+
+model OrderItem {
+  id          String   @id @default(cuid())
+  orderId     String
+  productId   String
+  productName String
+  unitPrice   Decimal  @db.Decimal(18, 2)
+  quantity    Int
+  subtotal    Decimal  @db.Decimal(18, 2)
+  order       Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product     Product  @relation(fields: [productId], references: [id], onDelete: Restrict)
+  digitalStocks DigitalStock[]
+  createdAt   DateTime @default(now())
+  @@index([orderId])
+  @@index([productId])
+  @@map("order_items")
+}
+
+model Payment {
+  id            String          @id @default(cuid())
+  orderId       String
+  provider      PaymentProvider @default(XENDIT)
+  method        PaymentMethod
+  amount        Decimal         @db.Decimal(18, 2)
+  status        PaymentStatus   @default(PENDING)
+  externalId    String?
+  checkoutUrl   String?
+  expiresAt     DateTime?
+  paidAt        DateTime?
+  rawResponse   Json?
+  order         Order @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  webhookEvents PaymentWebhookEvent[]
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  @@unique([provider, externalId])
+  @@index([orderId])
+  @@index([status])
+  @@map("payments")
+}
+
+model PaymentWebhookEvent {
+  id          String          @id @default(cuid())
+  paymentId   String?
+  provider    PaymentProvider
+  eventId     String
+  eventType   String
+  payload     Json
+  processedAt DateTime?
+  payment     Payment? @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  createdAt   DateTime @default(now())
+  @@unique([provider, eventId])
+  @@index([paymentId])
+  @@map("payment_webhook_events")
+}
